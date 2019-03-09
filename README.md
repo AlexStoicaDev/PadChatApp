@@ -1,4 +1,4 @@
-# pad-chat-app
+# PadChatApp
 Program care ofera o camera de discutii mai multor utilizatori.
 
 Componente:
