@@ -1,84 +1,122 @@
-
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <netdb.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
+#include <pthread.h>
+#include <errno.h>
 #include <unistd.h>
-int main(int argc, char *argv[])
-{
-	int fd = 0;
-	char buff[1024];
 
-	if(argc<3)
-	{
-		printf("Less no of arguments !!");
-		return 0;
-	}
+#define PORT 5678
+#define MAXBUF 1024
 
-	//Setup Buffer Array
-	memset(buff, '0',sizeof(buff));
+int *sockfd;
 
-	//Create Socket
-	fd = socket(AF_INET, SOCK_STREAM, 0);
-    	if(fd<0)
-	{
-		perror("Client Error: Socket not created succesfully");
-		return 0;
-	}
+pthread_mutex_t mutex;
 
-	//Structure to store details
-	struct sockaddr_in server;
-	memset(&server, '0', sizeof(server));
+int set_addr(struct sockaddr_in *addr, char *name, u_int32_t inaddr, short sin_port){
+  struct hostent *h;
+  memset((void *) addr, 0, sizeof(*addr));
+  addr->sin_family = AF_INET;
+  if(name != NULL){
+    h = gethostbyname(name);
+    if(h == NULL)
+      return -1;
+    addr->sin_addr.s_addr = *(u_int32_t *) h->h_addr_list[0];
+  }
+  else addr->sin_addr.s_addr = htonl(inaddr);
+  addr->sin_port = htons(sin_port);
+  return 0;
+}
 
-	//Initialize
-	server.sin_family = AF_INET;
-	server.sin_port =  htons(atoi(argv[2]));
+void *receiveMessage(void *arg){
+  int *conn = (int *)arg;
+  char buf[MAXBUF];
 
-	int in = inet_pton(AF_INET, argv[1], &server.sin_addr);
-	if(in<0)
-	{
-		perror("Client Error: IP not initialized succesfully");
-		return 0;
-	}
+  while(1){
+    if(recvfrom(*conn, buf, MAXBUF, 0, NULL, NULL) < 0){
+      continue;
+    }
+    else
+      printf("%s", buf);
+  }
 
-	//Connect to given server
-	in = connect(fd, (struct sockaddr *)&server, sizeof(server));
-	if(in<0)
-	{
-		perror("Client Error: Connection Failed.");
-		return 0;
-	}
+  close(*conn);
+  free(conn);
 
-	while(1)
-	{
-		printf("Please enter the message: ");
-    		bzero(buff,256);
-    		fgets(buff,255,stdin);
+  return NULL;
+}
 
-		    printf("\nSending to SERVER: %s ",buff);
+void *sendMessage(void *arg){
+  int *conn = (int *)arg;
+  char buf[MAXBUF];
+  
+  while(1){
+    fgets(buf, MAXBUF, stdin);
+    send(*conn, buf, MAXBUF, 0);
+  }
 
-		/* Send message to the server */
-    		in = send(fd,buff,strlen(buff),0);
-		    if (in < 0)
-		    {
-			 perror("\nClient Error: Writing to Server");
-		    	return 0;
-		    }
-				printf("here");
+  close(*conn);
+  free(conn);
 
-		/* Now read server response */
-		    bzero(buff,256);
-		    in = recv(fd,buff,255,0);
-		    if (in < 0)
-		    {
-			 perror("\nClient Error: Reading from Server");
-			return 0;
-		    }
-		    printf("\nReceived FROM SERVER: %s ",buff);
-	}
-	close(fd);
-	return 0;
+  return NULL;
+}
+
+int main(int argc, char *argv[]) {
+  //char username[20], password[20];
+  struct sockaddr_in local_addr, remote_addr;
+  pthread_t thread_r, thread_w;
+  pthread_attr_t attr;
+
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, 1);
+  pthread_mutex_init(&mutex, NULL);
+  
+  if(argc != 2){
+    printf("Trebuie sa transmiti adresa IP!\n");
+    exit(1);
+  }
+  
+  sockfd = (int *)malloc(sizeof(int));
+
+  if((*sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
+    printf("Nu am putut crea soclul!\n");
+    exit(1);
+  }
+
+  set_addr(&local_addr, NULL, INADDR_ANY, 0);
+  
+  if(bind(*sockfd, (struct sockaddr*)&local_addr, sizeof(local_addr)) == -1){
+    printf("Eroare la bind()!\n");
+    exit(1);
+  }
+
+  if(set_addr(&remote_addr, argv[1], 0, PORT) == -1){
+    printf("Eroare la adresa!\n");
+    exit(1);
+  }
+
+  if((connect(*sockfd, (struct sockaddr *)&remote_addr, sizeof(remote_addr))) == -1){
+    printf("Conectarea la server a esuat!\n");
+    exit(1);
+  }
+
+  if(pthread_create(&thread_r, &attr, receiveMessage, (void *)sockfd) != 0){
+    printf("Eroare la crearea unui fir nou de executie!\n");
+    exit(1);
+  }
+
+  if(pthread_create(&thread_w, &attr, sendMessage, (void *)sockfd) != 0){
+    printf("Eroare la crearea unui fir nou de executie!\n");
+    exit(1);
+  }
+
+  while(1){
+
+  }
+
+  exit(0);
 }

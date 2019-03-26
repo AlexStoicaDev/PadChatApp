@@ -1,116 +1,149 @@
-
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
+#include <stdlib.h>
 #include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <netinet/in.h>
+#include <fcntl.h>
+#include <string.h>
+#include <pthread.h>
+#include <netdb.h>
 
+#define BUFSZ 1024
+#define PORT (short)5678
 
-char *strrev(char *str)
-{
-      char *p1, *p2;
+typedef struct{
+  int socket;
+  pthread_t thread;
+  struct sockaddr_in addr;
+}connection;
 
-      if (! str || ! *str)
-            return str;
-      for (p1 = str, p2 = str + strlen(str) - 1; p2 > p1; ++p1, --p2)
-      {
-            *p1 ^= *p2;
-            *p2 ^= *p1;
-            *p1 ^= *p2;
-      }
-      return str;
+connection threads[20];
+
+pthread_mutex_t mutex;
+int threadNumber = 0;
+int fd;
+char buf[BUFSZ], welcome[]="Bun venit in chat!\n";
+pthread_t thread;
+int flag = 0;
+
+int set_addr(struct sockaddr_in *addr, char *name, u_int32_t inaddr, short sin_port){
+  struct hostent *h;
+  memset((void *) addr, 0, sizeof(*addr));
+  addr->sin_family = AF_INET;
+  if(name != NULL){
+    h = gethostbyname(name);
+    if(h == NULL)
+      return -1;
+    addr->sin_addr.s_addr = *(u_int32_t *) h->h_addr_list[0];
+  }
+  else addr->sin_addr.s_addr = htonl(inaddr);
+  addr->sin_port = htons(sin_port);
+  return 0;
 }
-int main()
-{
-	int fd = 0;
-	char buff[1024];
-	char nbuff[1024];
-  printf("start\n");
 
-	//Setup Buffer Array
-	memset(buff, '0',sizeof(buff));
+void delete(int conn){
+  for(int i = 0; i<threadNumber; i++){
+    if(conn == threads[i].socket){
+      for(int j = i+1; j<threadNumber; j++)
+	threads[j-1] = threads[j];
+    }
+    threadNumber--;
+    break;
+  }
+}
 
-	//Create Socket
-	fd = socket(AF_INET, SOCK_STREAM, 0);
-    	if(fd<0)
-	{
-		perror("Client Error: Socket not created succesfully");
-		return 0;
-	}
+void *ex4_proto(void *arg) {
+  int r;
+  int *conn = (int*)arg;
+  
+  printf("S-a conectat un client!\n");
 
-	//Structure to store details
-	struct sockaddr_in server;
-	memset(&server, '0', sizeof(server));
+  //send(*conn, welcome, strlen(welcome), 0);
+  
+  for(;;){
+    if((r = recvfrom(*conn, buf, BUFSZ, 0, NULL, NULL)) <= 0)
+      break;
+    else{
+      fputs(buf, stdout);
+      for(int i = 0; i < threadNumber; i++){
+	sendto(threads[i].socket, buf, BUFSZ, 0, (struct sockaddr *)&threads[i].addr, sizeof(threads[i].addr));
+      }
+    }
+  }
 
-	//Initialize
-	server.sin_family = AF_INET;
-	server.sin_port = htons(10011);
-        server.sin_addr.s_addr = htonl(INADDR_ANY);
+  delete(*conn);
+  close(*conn);
 
-  printf("before binf\n");
-	bind(fd, (struct sockaddr*)&server, sizeof(server));
-  printf("after bind\n");
-	int in;
+  pthread_mutex_lock(&mutex);
+  printf("Un client s-a deconectat!\n");
+  pthread_mutex_unlock(&mutex);
 
-	listen(fd, 10);
-  in = accept(fd, (struct sockaddr*)NULL, NULL);
-  printf("%d----\n",in);
-	while(in>0)
-	{
-		int childpid,n;
-		if ( (childpid = fork ()) == 0 )
-		{
+  return NULL;
+}
 
-			printf ("\nOne Client Connected !! ");
+int main(int argc, char *argv[]){
+  int sockfd, *connfd;
+  struct sockaddr_in local_addr, remote_addr;
+  socklen_t rlen;
+  pthread_attr_t attr;
 
-			//close listening socket
-			close (fd);
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, 1);
+  pthread_mutex_init(&mutex, NULL);
 
-			//Clear Zeroes
-			bzero(buff,256);
-			bzero(nbuff,256);
+  if(argc > 1){
+    printf("Server-ul nu primeste argumente!");
+    exit(1);
+  }
 
-			while ( (n = recv(in, buff, 256,0)) > 0)
-			{
+  if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
+    printf("Nu am putut crea soclul!\n");
+    exit(1);
+  }
 
-				printf("Server Received: %s",buff);
+  set_addr(&local_addr, NULL, INADDR_ANY, PORT);
+  
+  if(bind(sockfd, (struct sockaddr*)&local_addr, sizeof(local_addr)) == -1){
+    printf("Eroare la bind()\n!");
+    exit(1);
+  }
 
-				char *nbuff = strrev(buff);
-				printf("Server Sending: %s",strrev(buff));
-				//Send the reversed input
-				send(in, nbuff, strlen(nbuff), 0);
+  if(listen(sockfd, 5) == -1) {
+    printf("Eroare la listen()!\n");
+    exit(1);
+  }
 
-				bzero(buff,256);
+  rlen = sizeof(remote_addr);
 
-			}
-			close(in);
-			exit(0);
-		}
+  while(1){
+    connfd = (int *)malloc(sizeof(int));
+    if(connfd == NULL){
+      printf("Eroare la malloc()!\n");
+      exit(1);
+    }
+    *connfd = accept(sockfd, (struct sockaddr *)&remote_addr, &rlen);
 
-		int inp;
-		printf("In is: %d",in);
-		// Read server response
-		bzero(buff,256);
-		inp = recv(in,buff,256,0);
-		if (inp < 0)
-		{
-			perror("\nServer Error: Reading from Client");
-			return 0;
-		}
-		printf("Server Received: %s",buff);
-		printf("\nIn is: %d",in);
+    if(*connfd < 0){
+      printf("Eroare la accept()!\n");
+      exit(1);
+    }
+    
+    if(pthread_create(&threads[threadNumber].thread, &attr, ex4_proto, (void *)connfd) != 0){
+      printf("Eroare la crearea unui fir nou de executie!\n");
+      exit(1);
+    }
 
-		inp = send(in,buff,strlen(buff),0);
-		    if (inp < 0)
-		    {
-			 perror("\nServer Error: Writing to Server");
-		    	return 0;
-		    }
+    threads[threadNumber].socket = *connfd;
+    threads[threadNumber].addr = remote_addr;
 
-		sleep(1);
-      in = accept(fd, (struct sockaddr*)NULL, NULL);
-	}
+    pthread_mutex_lock(&mutex);
+    threadNumber++;
+    printf("%d conexiuni!\n", threadNumber);
+    pthread_mutex_unlock(&mutex);
+  }
+
+  exit(0);
+  
 }
