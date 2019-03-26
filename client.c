@@ -16,6 +16,7 @@
 int *sockfd;
 
 pthread_mutex_t mutex;
+char usr[20], pass[20], err[MAXBUF];
 
 int set_addr(struct sockaddr_in *addr, char *name, u_int32_t inaddr, short sin_port){
   struct hostent *h;
@@ -40,8 +41,23 @@ void *receiveMessage(void *arg){
     if(recvfrom(*conn, buf, MAXBUF, 0, NULL, NULL) < 0){
       continue;
     }
-    else
+    else{
       printf("%s", buf);
+      if(strcmp(buf, "1") == 0){
+	printf("Nu esti inregistrat pe server!\n");
+	
+	close(*conn);
+	free(conn);
+	exit(1);
+      }
+      else if(strcmp(buf, "2") == 0){
+	printf("Utilizatorul este deja conectat la server!\n");
+	
+	close(*conn);
+	free(conn);
+	exit(2);
+      }
+    }
   }
 
   close(*conn);
@@ -53,6 +69,9 @@ void *receiveMessage(void *arg){
 void *sendMessage(void *arg){
   int *conn = (int *)arg;
   char buf[MAXBUF];
+
+  send(*conn, usr, 20, 0);
+  send(*conn, pass, 20, 0);
   
   while(1){
     fgets(buf, MAXBUF, stdin);
@@ -79,7 +98,7 @@ int main(int argc, char *argv[]) {
     printf("Trebuie sa transmiti adresa IP!\n");
     exit(1);
   }
-  
+
   sockfd = (int *)malloc(sizeof(int));
 
   if((*sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
@@ -104,6 +123,15 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
+  
+  printf("Introdu numele de utilizator: ");
+
+  scanf("%s", usr);
+
+  printf("Introdu parola: ");
+
+  scanf("%s", pass);
+
   if(pthread_create(&thread_r, &attr, receiveMessage, (void *)sockfd) != 0){
     printf("Eroare la crearea unui fir nou de executie!\n");
     exit(1);
@@ -113,7 +141,7 @@ int main(int argc, char *argv[]) {
     printf("Eroare la crearea unui fir nou de executie!\n");
     exit(1);
   }
-
+  
   while(1){
 
   }

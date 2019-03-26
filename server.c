@@ -14,19 +14,25 @@
 #define PORT (short)5678
 
 typedef struct{
+  char usr[20], pass[20];
+  int connected;
+}client;
+
+typedef struct{
   int socket;
+  client c;
   pthread_t thread;
   struct sockaddr_in addr;
 }connection;
+
+client clients[20];
 
 connection threads[20];
 
 pthread_mutex_t mutex;
 int threadNumber = 0;
-int fd;
-char buf[BUFSZ], welcome[]="Bun venit in chat!\n";
+int noClients = 0;
 pthread_t thread;
-int flag = 0;
 
 int set_addr(struct sockaddr_in *addr, char *name, u_int32_t inaddr, short sin_port){
   struct hostent *h;
@@ -43,6 +49,15 @@ int set_addr(struct sockaddr_in *addr, char *name, u_int32_t inaddr, short sin_p
   return 0;
 }
 
+void addClient(char u[20], char p[20]){
+  client *c;
+  c = (client *)malloc(sizeof(client));
+  strcpy(c->usr, u);
+  strcpy(c->pass, p);
+  clients[noClients].connected = 0;
+  clients[noClients++] = *c;
+}
+
 void delete(int conn){
   for(int i = 0; i<threadNumber; i++){
     if(conn == threads[i].socket){
@@ -54,27 +69,57 @@ void delete(int conn){
   }
 }
 
+int validate(char usr[20], char pass[20]){
+  for(int i = 0; i < noClients; i++){
+    if((strcmp(clients[i].usr, usr) == 0) && (strcmp(clients[i].pass, pass) == 0)){
+      return i;
+    }
+  }
+  return -1;
+}
+
 void *ex4_proto(void *arg) {
   int r;
   int *conn = (int*)arg;
-  
-  printf("S-a conectat un client!\n");
+  char usr[20], pass[20], msg[BUFSZ];
+  char buf[BUFSZ];
 
-  //send(*conn, welcome, strlen(welcome), 0);
-  
-  for(;;){
-    if((r = recvfrom(*conn, buf, BUFSZ, 0, NULL, NULL)) <= 0)
-      break;
-    else{
-      fputs(buf, stdout);
-      for(int i = 0; i < threadNumber; i++){
-	sendto(threads[i].socket, buf, BUFSZ, 0, (struct sockaddr *)&threads[i].addr, sizeof(threads[i].addr));
+  recvfrom(*conn, usr, 20, 0, NULL, NULL);
+  recvfrom(*conn, pass, 20, 0, NULL, NULL);
+
+  if((r = validate(usr, pass)) < 0){
+    char err[] = "1";
+    send(*conn, err, strlen(err), 0);
+  }
+  else if(clients[r].connected == 1){
+    char err[] = "2";
+    send(*conn, err, strlen(err), 0);
+  }
+  else{
+    clients[r].connected = 1;
+      
+    printf("S-a conectat %s!\n", usr);
+
+    while(1){
+      if((r = recvfrom(*conn, buf, BUFSZ, 0, NULL, NULL)) <= 0)
+	break;
+      else{
+	strcpy(msg, usr);
+	strcat(msg, ": ");
+	strcat(msg, buf);
+	fputs(msg, stdout);
+	for(int i = 0; i < threadNumber; i++){
+	  sendto(threads[i].socket, msg, BUFSZ, 0, (struct sockaddr *)&threads[i].addr, sizeof(threads[i].addr));
+	}
       }
     }
   }
 
+  clients[r].connected = 0;
+
   delete(*conn);
   close(*conn);
+  free(conn);
 
   pthread_mutex_lock(&mutex);
   printf("Un client s-a deconectat!\n");
@@ -97,6 +142,9 @@ int main(int argc, char *argv[]){
     printf("Server-ul nu primeste argumente!");
     exit(1);
   }
+
+  addClient("laura", "alabalaportocala");
+  addClient("seby", "beby");
 
   if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
     printf("Nu am putut crea soclul!\n");
